@@ -240,6 +240,7 @@ function getCanvasCoords(clientX, clientY) {
 }
 
 window.addEventListener('keydown', (e) => {
+  if (e.repeat) return; // ignore auto-repeat from a held-down key
   if (e.code === 'Space' || e.code === 'ArrowUp') { e.preventDefault(); flap(); }
 });
 canvas.addEventListener('mousedown', (e) => {
@@ -651,8 +652,8 @@ function drawStartScreen() {
   drawColorSwatches();
 
   ctx.font = 'bold 14px "Courier New", monospace';
-  ctx.strokeText('Tap the bird area to flap', W/2, PLAY_BOTTOM - 30);
-  ctx.fillText('Tap the bird area to flap', W/2, PLAY_BOTTOM - 30);
+  ctx.strokeText('Click, tap, or press Space', W/2, PLAY_BOTTOM - 30);
+  ctx.fillText('Click, tap, or press Space', W/2, PLAY_BOTTOM - 30);
 }
 
 function drawGameOver() {
