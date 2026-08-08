@@ -39,19 +39,21 @@ const STATUS_H = 0;
 const GROUND_TOP_H = 22;
 const GROUND_H = 150;
 let PLAY_BOTTOM;
-const MAX_GAME_WIDTH = 480; // caps play width on wide desktop screens so pipe/gap sizing stays sane
+const MAX_GAME_WIDTH = 480;  // caps play width on wide desktop screens
+const MAX_GAME_HEIGHT = 720; // caps play height on tall desktop windows
 
 function resizeCanvas() {
   const vv = window.visualViewport;
   const viewW = Math.round(vv ? vv.width : window.innerWidth);
   const viewH = Math.round(vv ? vv.height : window.innerHeight);
   W = Math.min(viewW, MAX_GAME_WIDTH);
-  H = viewH;
+  H = Math.min(viewH, MAX_GAME_HEIGHT);
   canvas.width = W;
   canvas.height = H;
   canvas.style.width = W + 'px';
   canvas.style.height = H + 'px';
   canvas.style.left = Math.round((viewW - W) / 2) + 'px';
+  canvas.style.top = Math.round((viewH - H) / 2) + 'px';
   PLAY_BOTTOM = H - GROUND_H - GROUND_TOP_H;
 }
 resizeCanvas();
