@@ -27,9 +27,24 @@
     cursor: pointer;
     box-shadow: 0 0 0 1px rgba(255,255,255,0.08), 0 10px 40px rgba(0,0,0,0.5);
   }
+  /* File inputs are never visible or laid out on screen — they only
+     exist so JS can open the native file picker. They can never sit on
+     top of the canvas or intercept a touch, since they have no size
+     and no position in the page flow. */
+  .hidden-file-input {
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
 </style>
 </head>
 <body>
+<input type="file" id="flapFileInput" accept="audio/*" class="hidden-file-input">
+<input type="file" id="scoreFileInput" accept="audio/*" class="hidden-file-input">
+<input type="file" id="hitFileInput" accept="audio/*" class="hidden-file-input">
 <canvas id="gameCanvas"></canvas>
 <script>
 const canvas = document.getElementById('gameCanvas');
@@ -170,10 +185,103 @@ function beep(freq, dur, type='square', vol=0.15) {
   g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
   o.stop(audioCtx.currentTime + dur);
 }
-function sfxFlap() { beep(500, 0.09, 'square', 0.28); }
-function sfxScore() { beep(950, 0.14, 'sine', 0.35); }
+function sfxFlap() {
+  if (customFlapAudio) { playCustomAudio(customFlapAudio); return; }
+  beep(500, 0.09, 'square', 0.28);
+}
+function sfxScore() {
+  if (customScoreAudio) { playCustomAudio(customScoreAudio); return; }
+  beep(950, 0.14, 'sine', 0.35);
+}
 function sfxHit() { beep(120, 0.3, 'sawtooth', 0.2); }
 function sfxSelect() { beep(700, 0.05, 'square', 0.08); }
+
+// ---------- Custom sound settings ----------
+// Everything here is driven through the canvas's own tap handler,
+// exactly like the color swatches — there is no separate DOM overlay
+// that could ever sit on top of the canvas and steal touches. The
+// three file inputs below are 0x0 and invisible; they only exist so
+// JS can open the native file picker programmatically.
+let customFlapAudio = null;
+let customScoreAudio = null;
+let settingsOpen = false;
+
+function playCustomAudio(audio) {
+  try {
+    audio.currentTime = 0;
+    const p = audio.play();
+    if (p && p.catch) p.catch(() => {});
+  } catch (e) {}
+}
+
+function unlockCustomAudio(audio) {
+  try {
+    const p = audio.play();
+    if (p && p.catch) p.catch(() => {});
+    audio.pause();
+    audio.currentTime = 0;
+  } catch (e) {}
+}
+
+function loadCustomSoundFile(file, onReady) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const audio = new Audio(reader.result);
+    audio.preload = 'auto';
+    unlockCustomAudio(audio);
+    onReady(audio);
+  };
+  reader.readAsDataURL(file);
+}
+
+const flapFileInput = document.getElementById('flapFileInput');
+const scoreFileInput = document.getElementById('scoreFileInput');
+const hitFileInput = document.getElementById('hitFileInput');
+
+flapFileInput.addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  loadCustomSoundFile(file, (audio) => { customFlapAudio = audio; });
+});
+scoreFileInput.addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  loadCustomSoundFile(file, (audio) => { customScoreAudio = audio; });
+});
+hitFileInput.addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    hitSoundAudio.src = reader.result;
+    hitSoundUnlocked = false;
+    unlockHitSound();
+  };
+  reader.readAsDataURL(file);
+});
+
+function pickCustomSound(target) {
+  ensureAudio();
+  if (target === 'flap') flapFileInput.click();
+  else if (target === 'score') scoreFileInput.click();
+  else if (target === 'hit') hitFileInput.click();
+}
+
+function resetCustomSound(target) {
+  if (target === 'flap') { customFlapAudio = null; flapFileInput.value = ''; }
+  else if (target === 'score') { customScoreAudio = null; scoreFileInput.value = ''; }
+  else if (target === 'hit') {
+    hitSoundAudio.src = hitSoundDataURL;
+    hitSoundUnlocked = false;
+    hitFileInput.value = '';
+  }
+}
+
+function previewCustomSound(target) {
+  ensureAudio();
+  if (target === 'flap') sfxFlap();
+  else if (target === 'score') sfxScore();
+  else if (target === 'hit') { unlockHitSound(); playHitSound(); }
+}
 
 // ---------- Helpers ----------
 function resetGame() {
@@ -186,6 +294,7 @@ function resetGame() {
   flashAlpha = 0;
   deadFallDone = false;
   trail = [];
+  settingsOpen = false;
   spawnInitialPipes();
 }
 
@@ -244,7 +353,65 @@ function swatchRects() {
   }));
 }
 
+// ---------- Settings icon + panel hit-testing ----------
+function settingsIconRect() {
+  return { x: W - 44, y: 12, w: 32, h: 32 };
+}
+
+function settingsPanelLayout() {
+  const panelW = Math.min(280, W - 40);
+  const panelH = 260;
+  const x = W/2 - panelW/2;
+  const y = (STATUS_H + PLAY_BOTTOM) / 2 - panelH/2;
+  const rowH = 56;
+  const rows = ['flap', 'score', 'hit'].map((target, i) => ({
+    target,
+    y: y + 50 + i * rowH,
+    h: rowH - 10,
+  }));
+  return { x, y, w: panelW, h: panelH, rows, closeBtn: { x: x + panelW - 34, y: y + 10, w: 24, h: 24 } };
+}
+
+function handleSettingsPanelTap(px, py) {
+  const layout = settingsPanelLayout();
+  const c = layout.closeBtn;
+  if (px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h) {
+    settingsOpen = false;
+    return true;
+  }
+  for (const row of layout.rows) {
+    const changeBtn = { x: layout.x + layout.w - 150, y: row.y, w: 90, h: row.h };
+    const resetBtn = { x: layout.x + layout.w - 54, y: row.y, w: 34, h: row.h };
+    const labelZone = { x: layout.x + 10, y: row.y, w: changeBtn.x - (layout.x + 10) - 6, h: row.h };
+    if (px >= changeBtn.x && px <= changeBtn.x + changeBtn.w && py >= changeBtn.y && py <= changeBtn.y + changeBtn.h) {
+      pickCustomSound(row.target);
+      return true;
+    }
+    if (px >= resetBtn.x && px <= resetBtn.x + resetBtn.w && py >= resetBtn.y && py <= resetBtn.y + resetBtn.h) {
+      resetCustomSound(row.target);
+      return true;
+    }
+    if (px >= labelZone.x && px <= labelZone.x + labelZone.w && py >= labelZone.y && py <= labelZone.y + labelZone.h) {
+      previewCustomSound(row.target);
+      return true;
+    }
+  }
+  // tapping anywhere else inside the panel does nothing (absorbs the tap
+  // so it doesn't fall through to a flap)
+  if (px >= layout.x && px <= layout.x + layout.w && py >= layout.y && py <= layout.y + layout.h) return true;
+  return false;
+}
+
 function handlePointer(px, py) {
+  const gear = settingsIconRect();
+  if (state === 'start' && px >= gear.x && px <= gear.x + gear.w && py >= gear.y && py <= gear.y + gear.h) {
+    settingsOpen = !settingsOpen;
+    return;
+  }
+  if (settingsOpen) {
+    handleSettingsPanelTap(px, py);
+    return;
+  }
   if (state === 'start') {
     const rects = swatchRects();
     for (const r of rects) {
@@ -660,6 +827,118 @@ function drawColorSwatches() {
   ctx.fillText('Choose your bird', W/2, SWATCH_Y() - 10);
 }
 
+function drawSettingsIcon() {
+  const g = settingsIconRect();
+  const cx = g.x + g.w / 2, cy = g.y + g.h / 2;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, g.w / 2, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // simple gear glyph: circle + 6 teeth + center hole
+  ctx.translate(cx, cy);
+  ctx.fillStyle = '#fff';
+  const r1 = 4.5, r2 = 8, teeth = 6;
+  ctx.beginPath();
+  for (let i = 0; i < teeth; i++) {
+    const a0 = (i / teeth) * Math.PI * 2;
+    const a1 = a0 + (Math.PI * 2) / teeth / 2;
+    ctx.arc(0, 0, r2, a0, a1);
+    ctx.arc(0, 0, r1, a1, a0, true);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.beginPath();
+  ctx.arc(0, 0, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawSettingsPanel() {
+  const layout = settingsPanelLayout();
+
+  // dim the game behind the panel
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#f5efce';
+  ctx.strokeStyle = '#7a5c3e';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  roundRect(layout.x, layout.y, layout.w, layout.h, 10);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = '#7a5c3e';
+  ctx.font = 'bold 14px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('SOUND SETTINGS', layout.x + layout.w / 2, layout.y + 26);
+
+  const labels = { flap: 'Flap sound', score: 'Score sound', hit: 'Hit sound' };
+  const hasCustom = { flap: !!customFlapAudio, score: !!customScoreAudio, hit: hitSoundAudio.src !== hitSoundDataURL };
+
+  for (const row of layout.rows) {
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#3b3b3b';
+    ctx.font = 'bold 13px "Courier New", monospace';
+    ctx.fillText(labels[row.target], layout.x + 12, row.y + 20);
+    ctx.font = '10px "Courier New", monospace';
+    ctx.fillStyle = hasCustom[row.target] ? '#3f8a42' : '#8a7c5a';
+    ctx.fillText(hasCustom[row.target] ? 'Custom — tap to preview' : 'Default — tap to preview', layout.x + 12, row.y + 36);
+
+    const changeBtn = { x: layout.x + layout.w - 150, y: row.y, w: 90, h: row.h };
+    const resetBtn = { x: layout.x + layout.w - 54, y: row.y, w: 34, h: row.h };
+
+    ctx.fillStyle = '#ded99a';
+    ctx.strokeStyle = '#7a5c3e';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    roundRect(changeBtn.x, changeBtn.y, changeBtn.w, changeBtn.h, 6);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#3b3b3b';
+    ctx.font = 'bold 11px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Choose file', changeBtn.x + changeBtn.w / 2, changeBtn.y + changeBtn.h / 2 + 4);
+
+    ctx.fillStyle = '#f0a91f';
+    ctx.strokeStyle = '#7a5c3e';
+    ctx.beginPath();
+    roundRect(resetBtn.x, resetBtn.y, resetBtn.w, resetBtn.h, 6);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#3b3b3b';
+    ctx.font = 'bold 9px "Courier New", monospace';
+    ctx.fillText('Reset', resetBtn.x + resetBtn.w / 2, resetBtn.y + resetBtn.h / 2 + 3);
+
+    ctx.strokeStyle = 'rgba(122,92,62,0.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(layout.x + 8, row.y + row.h + 5);
+    ctx.lineTo(layout.x + layout.w - 8, row.y + row.h + 5);
+    ctx.stroke();
+  }
+
+  const c = layout.closeBtn;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.arc(c.x + c.w / 2, c.y + c.h / 2, c.w / 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  const pad = 6;
+  ctx.moveTo(c.x + pad, c.y + pad);
+  ctx.lineTo(c.x + c.w - pad, c.y + c.h - pad);
+  ctx.moveTo(c.x + c.w - pad, c.y + pad);
+  ctx.lineTo(c.x + pad, c.y + c.h - pad);
+  ctx.stroke();
+}
+
 function drawStartScreen() {
   ctx.fillStyle = '#fff';
   ctx.strokeStyle = '#3b5d2f';
@@ -681,6 +960,9 @@ function drawStartScreen() {
   ctx.font = 'bold 14px "Courier New", monospace';
   ctx.strokeText('Click, tap, or press Space', W/2, PLAY_BOTTOM - 30);
   ctx.fillText('Click, tap, or press Space', W/2, PLAY_BOTTOM - 30);
+
+  drawSettingsIcon();
+  if (settingsOpen) drawSettingsPanel();
 }
 
 function drawGameOver() {
