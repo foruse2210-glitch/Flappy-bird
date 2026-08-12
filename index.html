@@ -93,6 +93,45 @@ const COLORS = [
 let colorIndex = parseInt(localStorage.getItem('flappyColorIdx') || '0', 10);
 if (colorIndex < 0 || colorIndex >= COLORS.length) colorIndex = 0;
 
+// ============================================================
+// DEVELOPER-CUSTOMIZABLE BIRD SPRITE
+// ------------------------------------------------------------
+// To swap in your own bird artwork, set BIRD_IMAGE_SRC below to
+// either:
+//   - a URL:            'https://example.com/my-bird.png'
+//   - a data URL:        'data:image/png;base64,iVBORw0K...'
+//   - a relative path:   './assets/my-bird.png'
+//
+// The image should face RIGHT and ideally have a transparent
+// background (PNG). It will be scaled to fit the bird's hitbox
+// and rotated automatically as it flies/falls, just like the
+// built-in bird.
+//
+// You can also supply a different image per color slot (matching
+// the COLORS array above) via BIRD_IMAGE_SRC_BY_COLOR — e.g. set
+// index 0 for the Yellow bird's own art, index 1 for Red, etc.
+// Leave an entry empty ('') to fall back to BIRD_IMAGE_SRC (or the
+// built-in drawn bird if that's empty too) for that color slot.
+//
+// Leave everything empty to keep using the built-in hand-drawn bird.
+// ============================================================
+const BIRD_IMAGE_SRC = '';
+const BIRD_IMAGE_SRC_BY_COLOR = ['', '', '', '', ''];
+
+const birdImagesByColor = COLORS.map((c, i) => {
+  const src = BIRD_IMAGE_SRC_BY_COLOR[i] || BIRD_IMAGE_SRC;
+  if (!src) return null;
+  const img = new Image();
+  img.loaded = false;
+  img.onload = () => { img.loaded = true; };
+  img.src = src;
+  return img;
+});
+function getBirdImage() {
+  const img = birdImagesByColor[colorIndex];
+  return (img && img.loaded) ? img : null;
+}
+
 const OUTLINE = '#4a2c3a';
 
 // ---------- Sound ----------
@@ -320,16 +359,6 @@ function die() {
   playHitSound();
   lastScoreWasNewBest = score > best;
   if (lastScoreWasNewBest) { best = score; localStorage.setItem('flappyBest', best); }
-fetch('/api/submit-score', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({ score: score }),
-})
-.then(response => response.json())
-.then(data => console.log('Success:', data))
-.catch(error => console.error('Error:', error));
 }
 
 // ---------- Background/pipes/ground ----------
@@ -487,7 +516,26 @@ function drawTrail() {
 }
 
 // ---------- Bird: original flat-vector illustration ----------
+function drawBirdFromImage(img) {
+  const flap = state === 'dead' ? 0 : Math.sin(frame * 0.45);
+  const scale = Math.max(BIRD_W / img.naturalWidth, BIRD_H / img.naturalHeight);
+  const w = img.naturalWidth * scale;
+  const h = img.naturalHeight * scale;
+
+  ctx.save();
+  ctx.translate(bird.x, bird.y + flap * 1.2);
+  ctx.rotate(bird.rotation * Math.PI / 180);
+  ctx.drawImage(img, -w / 2, -h / 2, w, h);
+  ctx.restore();
+}
+
 function drawBird() {
+  const customImg = getBirdImage();
+  if (customImg) {
+    drawBirdFromImage(customImg);
+    return;
+  }
+
   const c = COLORS[colorIndex];
   const flap = state === 'dead' ? 0 : Math.sin(frame * 0.45);
 
