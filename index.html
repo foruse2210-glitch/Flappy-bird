@@ -103,9 +103,9 @@ if (colorIndex < 0 || colorIndex >= COLORS.length) colorIndex = 0;
 //   - a relative path:   './assets/my-bird.png'
 //
 // The image should face RIGHT and ideally have a transparent
-// background (PNG). It will be scaled to fit the bird's hitbox
-// and rotated automatically as it flies/falls, just like the
-// built-in bird.
+// background (PNG). By default it's scaled to fit the bird's
+// hitbox and rotated automatically as it flies/falls, just like
+// the built-in bird — but you can override the size below.
 //
 // You can also supply a different image per color slot (matching
 // the COLORS array above) via BIRD_IMAGE_SRC_BY_COLOR — e.g. set
@@ -113,10 +113,24 @@ if (colorIndex < 0 || colorIndex >= COLORS.length) colorIndex = 0;
 // Leave an entry empty ('') to fall back to BIRD_IMAGE_SRC (or the
 // built-in drawn bird if that's empty too) for that color slot.
 //
+// SIZE: leave BIRD_IMAGE_WIDTH / BIRD_IMAGE_HEIGHT as null to
+// auto-fit the image to the gameplay hitbox (BIRD_W x BIRD_H) while
+// preserving its aspect ratio. Set either one to a number (pixels)
+// to force that exact size instead — set only one to scale the
+// other proportionally, or set both for an exact width x height.
+// BIRD_IMAGE_SCALE is a simple multiplier applied on top of
+// whichever sizing rule above is used (1 = no change, 1.5 = 50%
+// bigger, 0.75 = 25% smaller). Note: making the image much larger
+// than the hitbox means it'll look bigger than where collisions
+// actually happen.
+//
 // Leave everything empty to keep using the built-in hand-drawn bird.
 // ============================================================
 const BIRD_IMAGE_SRC = 'Picsart_26-08-12_09-00-27-077.png';
 const BIRD_IMAGE_SRC_BY_COLOR = ['', '', '', '', ''];
+const BIRD_IMAGE_WIDTH = null;
+const BIRD_IMAGE_HEIGHT = null;
+const BIRD_IMAGE_SCALE = 3;
 
 const birdImagesByColor = COLORS.map((c, i) => {
   const src = BIRD_IMAGE_SRC_BY_COLOR[i] || BIRD_IMAGE_SRC;
@@ -518,9 +532,26 @@ function drawTrail() {
 // ---------- Bird: original flat-vector illustration ----------
 function drawBirdFromImage(img) {
   const flap = state === 'dead' ? 0 : Math.sin(frame * 0.45);
-  const scale = Math.max(BIRD_W / img.naturalWidth, BIRD_H / img.naturalHeight);
-  const w = img.naturalWidth * scale;
-  const h = img.naturalHeight * scale;
+
+  let w, h;
+  if (BIRD_IMAGE_WIDTH != null || BIRD_IMAGE_HEIGHT != null) {
+    if (BIRD_IMAGE_WIDTH != null && BIRD_IMAGE_HEIGHT != null) {
+      w = BIRD_IMAGE_WIDTH;
+      h = BIRD_IMAGE_HEIGHT;
+    } else if (BIRD_IMAGE_WIDTH != null) {
+      w = BIRD_IMAGE_WIDTH;
+      h = w * (img.naturalHeight / img.naturalWidth);
+    } else {
+      h = BIRD_IMAGE_HEIGHT;
+      w = h * (img.naturalWidth / img.naturalHeight);
+    }
+  } else {
+    const fitScale = Math.max(BIRD_W / img.naturalWidth, BIRD_H / img.naturalHeight);
+    w = img.naturalWidth * fitScale;
+    h = img.naturalHeight * fitScale;
+  }
+  w *= BIRD_IMAGE_SCALE;
+  h *= BIRD_IMAGE_SCALE;
 
   ctx.save();
   ctx.translate(bird.x, bird.y + flap * 1.2);
